@@ -536,7 +536,7 @@ function processKeyDown(i32 i, (Map map, ...maps), State state, SDL::KeyboardEve
         return map -> processKeyDown(i + 1, ...maps, state, key);
     }
 
-    return processKeyDown(map) -> processKeyDown(i + 1, ...maps, state, key);
+    return processKeyDown(map, key) -> processKeyDown(i + 1, ...maps, state, key);
 }
 
 function processKeyDown(State state, SDL::KeyboardEvent key)
