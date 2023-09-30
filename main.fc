@@ -1,0 +1,871 @@
+global Red: 1;
+global Green: 2;
+global Blue: 4;
+global Cyan: Green | Blue;
+global Purple: Red | Blue;
+global Yellow: Red | Green;
+global Gray: Cyan + 1;
+
+struct Color
+{
+    r,
+    g,
+    b
+};
+
+function rgb(i32 r, i32 g, i32 b)
+{
+    return Color
+    {
+        r: r,
+        g: g,
+        b: b
+    };
+}
+
+struct Requirement
+{
+    color,
+    count
+};
+
+struct Map
+{
+    title,
+    tiles,
+    requirements
+};
+
+struct State
+{
+    renderer,
+    font,
+    maps,
+    activeColor,
+
+    cursor: Tile {},
+    mapIndex: 0
+};
+
+global Width: 800;
+global Height: 600;
+
+global TileSize: 32;
+global BorderSize: 4;
+global GridSize: 1;
+global Padding: 4;
+
+struct EventState
+{
+    u32 type: 0u32,
+
+    SDL::KeyboardEvent key,
+    SDL::MouseMotionEvent motion,
+    SDL::MouseButtonEvent button,
+    SDL::MouseWheelEvent wheel
+};
+
+function createEventState()
+{
+    return EventState
+    {
+        key: SDL::KeyboardEvent {},
+        motion: SDL::MouseMotionEvent {},
+        button: SDL::MouseButtonEvent {},
+        wheel: SDL::MouseWheelEvent {},
+    };
+}
+
+function serialize(...range)
+{
+    return serialize(Memory::allocate(200i64), 0i64, ...range);
+}
+
+function serialize(buffer storage, i64 offset, (any c, ...remaining))
+{
+    if (Memory::details::set(storage, offset, c))
+    {
+        return tail serialize(Memory::reallocate(storage, offset + 2i64), offset + 1i64, ...remaining);
+    }
+
+    return tail serialize(storage, offset, ...remaining);
+}
+
+function serialize(buffer storage, i64 offset, any c)
+{
+    Memory::details::set(storage, offset, c);
+
+    return storage;
+}
+
+function sqrt(i32 number)
+{
+    return sqrt(number, 1, 1);
+}
+
+function sqrt(i32 number, i32 subtrahend, i32 i)
+{
+    if ((number - subtrahend) <= 0)
+    {
+        return i;
+    }
+
+    return tail sqrt(number - subtrahend, subtrahend + 2, i + 1);
+}
+
+function mapBounds(Map map)
+{
+    let size = sqrt(Range::size(...map.tiles, 0));
+
+    return SDL::Rect
+    {
+        x: TileSize,
+        y: TileSize * 3,
+        width: size * TileSize,
+        height: size * TileSize
+    };
+}
+
+function inflate(SDL::Rect rect, i32 x, i32 y)
+{
+    return rect with
+    {
+        x: rect.x - (x / 2),
+        y: rect.y - (y / 2),
+        width: rect.width + x,
+        height: rect.height + y
+    };
+}
+
+function iota(i32 i, i32 count)
+{
+    if (i < count)
+    {
+        return i -> iota(i + 1, count);
+    }
+
+    return i;
+}
+
+function iota(i32 count)
+{
+    return iota(0, count);
+}
+
+function abs(i32 value)
+{
+    if (value < 0)
+    {
+        return value * -1;
+    }
+
+    return value;
+}
+
+function isTileUnderCursor(Tile tile, Tile cursor)
+{
+    return (abs(cursor.x - tile.x) <= 1)
+        && (abs(cursor.y - tile.y) <= 1);
+}
+
+function colorForTile(Color activeColor, Color tileColor, Tile tile, Tile cursor)
+{
+    if (isTileUnderCursor(tile, cursor))
+    {
+        return activeColor;
+    }
+
+    return tileColor;
+}
+
+function colorForTile(Color activeColor, without tileColor, Tile tile, Tile cursor)
+{
+    if (isTileUnderCursor(tile, cursor))
+    {
+        return activeColor;
+    }
+
+    return rgb(0, 0, 0);
+}
+
+function colorForTile(any activeColor, any tileColor, Tile tile, Tile cursor)
+{
+    return rgb(0, 0, 0);
+}
+
+function drawGrid(Map map, State state, SDL::Rect outerBounds, i32 i, i32 color)
+{
+    let size = sqrt(Range::size(...map.tiles, 0));
+
+    let tile = tileFromIndex(i, size);
+
+    let bounds = SDL::Rect
+    {
+        x: (outerBounds.x + BorderSize) + ((tile.x * TileSize) + (tile.x * GridSize)),
+        y: (outerBounds.y + BorderSize) + ((tile.y * TileSize) + (tile.y * GridSize)),
+        width: TileSize,
+        height: TileSize
+    };
+
+    let tileColor = colorForTile(rgbFor(state.activeColor), rgbFor(color), tile, state.cursor);
+
+    SDL::SDL_SetRenderDrawColor(state.renderer, tileColor.r, tileColor.g, tileColor.b, 255);
+    SDL::SDL_RenderFillRect(state.renderer, bounds);
+
+    return nothing;
+}
+
+function tileFromIndex(i32 index, i32 size)
+{
+    let x = (index % size);
+    let y = (index - x) / size;
+
+    return Tile
+    {
+        x: x,
+        y: y
+    };
+}
+
+function drawGrid(Map map, State state, SDL::Rect outerBounds, i32 i, (i32 color, ...indexes))
+{
+    drawGrid(map, state, outerBounds, i, color);
+
+    return tail drawGrid(map, state, outerBounds, i + 1, ...indexes);
+}
+
+struct Tile
+{
+    x: 0,
+    y: 0
+};
+
+function drawMap(without map, State state)
+{
+    return nothing;
+}
+
+function drawMap(Map map, State state)
+{
+    let numberOfTiles = Range::size(...map.tiles, 0);
+    let size = sqrt(numberOfTiles);
+
+    let innerBounds = mapBounds(map);
+    let outerBounds = inflate(innerBounds
+        , (BorderSize * 2) + (GridSize * (size - 1))
+        , (BorderSize * 2) + (GridSize * (size - 1))
+        );
+
+    SDL::SDL_SetRenderDrawColor(state.renderer, 255, 255, 255, 255);
+    SDL::SDL_RenderFillRect(state.renderer, outerBounds);
+
+    drawGrid(map, state, outerBounds, 0, ...map.tiles);
+    drawRequirement(map, state, (outerBounds.x + outerBounds.width) + TileSize, outerBounds.y, ...map.requirements);
+    drawTile(state, outerBounds.x + ((outerBounds.width - TileSize) / 2), (outerBounds.y + outerBounds.height) + TileSize, rgbFor(state.activeColor));
+    drawText(state, TileSize, TileSize, map.title);
+
+    return outerBounds;
+}
+
+function drawTile(State state, i32 x, i32 y, without color)
+{
+    return nothing;
+}
+
+function drawTile(State state, i32 x, i32 y, Color color)
+{
+    let bounds = SDL::Rect
+    {
+        x: x,
+        y: y,
+        width: TileSize,
+        height: TileSize
+    };
+
+    SDL::SDL_SetRenderDrawColor(state.renderer, color.r, color.g, color.b, 255);
+    SDL::SDL_RenderFillRect(state.renderer, bounds);
+
+    return nothing;
+}
+
+import string toString(buffer input);
+
+function drawText(State state, i32 x, i32 y, string text)
+{
+    let surface = SDL::TTF::RenderText_Solid(state.font, text, 255, 255, 255);
+    let texture = SDL::SDL_CreateTextureFromSurface(state.renderer, surface);
+
+    let height = SDL::GetSurfaceHeight(surface);
+
+    let rect = SDL::Rect
+    {
+        x: x,
+        y: y + ((TileSize - height) / 2),
+        width: SDL::GetSurfaceWidth(surface),
+        height: height
+    };
+
+	SDL::SDL_RenderCopy(state.renderer, texture, 0i64, rect);
+	SDL::SDL_FreeSurface(surface);
+
+    return nothing;
+}
+
+function count(i32 c, any item, any context, function (any, any) predicate)
+{
+    if (predicate(item, context))
+    {
+        return c + 1;
+    }
+
+    return c;
+}
+
+function count(i32 c, (any item, ...items), any context, function (any, any) predicate)
+{
+    if (predicate(item, context))
+    {
+        return tail count(c + 1, ...items, context, predicate);
+    }
+
+    return tail count(c, ...items, context, predicate);
+}
+
+function isColor(i32 actual, i32 lookingFor)
+{
+    return actual == lookingFor;
+}
+
+function countForColor(Map map, i32 color)
+{
+    return count(0, ...map.tiles, color, isColor);
+}
+
+function rgbFor(i32 colorIndex)
+{
+    if (colorIndex == Red)
+    {
+        return rgb(255, 0, 0);
+    }
+
+    if (colorIndex == Green)
+    {
+        return rgb(0, 255, 0);
+    }
+
+    if (colorIndex == Blue)
+    {
+        return rgb(0, 0, 255);
+    }
+
+    if (colorIndex == Cyan)
+    {
+        return rgb(0, 255, 255);
+    }
+
+    if (colorIndex == Yellow)
+    {
+        return rgb(255, 255, 0);
+    }
+
+    if (colorIndex == Purple)
+    {
+        return rgb(255, 0, 255);
+    }
+
+    if (colorIndex == Gray)
+    {
+        return rgb(255, 255, 255);
+    }
+
+    return rgb(0, 0, 0);
+}
+
+function drawRequirement(Map map, State state, i32 x, i32 y, Requirement requirement)
+{
+    let count = countForColor(map, requirement.color);
+    let color = rgbFor(requirement.color);
+
+    let text = String::format(..."{} / {}", ...[count, requirement.count]);
+
+    drawTile(state, x, y, color);
+    drawText(state, (x + TileSize) + (Padding * 3), y, toString(Memory::serialize(text)));
+
+    return nothing;
+}
+
+import SDL::SDL_Surface RenderText_Solid(SDL::TTF::Font font, buffer text, i32 r, i32 g, i32 b);
+
+function drawRequirement(Map map, State state, i32 x, i32 y, (Requirement requirement, ...requirements))
+{
+    drawRequirement(map, state, x, y, requirement);
+
+    return tail drawRequirement(map, state, x, (y + TileSize) + Padding, ...requirements);
+}
+
+function changeActiveColor(State state, SDL::MouseWheelEvent wheel)
+{
+    if (wheel.y > 0)
+    {
+        return state with
+        {
+            activeColor: Math::min(Blue, state.activeColor << 1)
+        };
+    }
+
+    if (wheel.y < 0)
+    {
+        return state with
+        {
+            activeColor: Math::max(1, state.activeColor >> 1)
+        };
+    }
+
+    return state;
+}
+
+function changeCursorPosition(Map map, State state, SDL::MouseMotionEvent motion)
+{
+    let innerBounds = mapBounds(map);
+
+    return state with
+    {
+        cursor: Tile
+        {
+            x: ((motion.x - innerBounds.x) / (TileSize + GridSize)),
+            y: ((motion.y - innerBounds.y) / (TileSize + GridSize))
+        }
+    };
+}
+
+function blendColors(i32 left, i32 right)
+{
+    return Math::min(Gray, left | right);
+}
+
+function placeTile(i32 i, i32 size, i32 color, State state)
+{
+    let tile = tileFromIndex(i, size);
+
+    if (isTileUnderCursor(tile, state.cursor))
+    {
+        return blendColors(color, state.activeColor);
+    }
+
+    return color;
+}
+
+import i32 puts(string s);
+import void printnum(i32 number);
+
+function placeTile(i32 i, i32 size, (i32 color, ...tiles), State state)
+{
+    return placeTile(i, size, color, state) -> placeTile(i + 1, size, ...tiles, state);
+}
+
+function placeTile(Map map, State state)
+{
+    let numElem = Range::size(...map.tiles, 0);
+    let size = sqrt(numElem);
+
+    printnum(numElem);
+
+    return map with
+    {
+        tiles: serialize(placeTile(0, size, ...map.tiles, state))
+    };
+}
+
+function placeTile(i32 i, Map map, State state)
+{
+    if (i != state.mapIndex)
+    {
+        return map;
+    }
+
+    return placeTile(map, state);
+}
+
+function placeTile(i32 i, (Map map, ...maps), State state)
+{
+    if (i != state.mapIndex)
+    {
+        return map -> placeTile(i + 1, ...maps, state);
+    }
+
+    return placeTile(map, state) -> placeTile(i + 1, ...maps, state);
+}
+
+function placeTile(State state)
+{
+    return state with
+    {
+        maps: placeTile(0, ...state.maps, state)
+    };
+}
+
+import i64 toInt64(i32 value);
+
+function processKeyDown(Map map, SDL::KeyboardEvent key)
+{
+    if (key.sym == SDL::SDLK_s)
+    {
+        return map with
+        {
+            tiles: Memory::allocate(toInt64(Range::size(...map.tiles, 0)))
+        };
+    }
+
+    return map;
+}
+
+function processKeyDown(i32 i, Map map, State state, SDL::KeyboardEvent key)
+{
+    if (i != state.mapIndex)
+    {
+        return map;
+    }
+
+    return processKeyDown(map, key);
+}
+
+function processKeyDown(i32 i, (Map map, ...maps), State state, SDL::KeyboardEvent key)
+{
+    if (i != state.mapIndex)
+    {
+        return map -> processKeyDown(i + 1, ...maps, state, key);
+    }
+
+    return processKeyDown(map) -> processKeyDown(i + 1, ...maps, state, key);
+}
+
+function processKeyDown(State state, SDL::KeyboardEvent key)
+{
+    return state with
+    {
+        maps: processKeyDown(0, ...state.maps, state, key)
+    };
+}
+
+function handleInput(Map map, State state, EventState events)
+{
+    if (events.type == SDL::MOUSEWHEEL)
+    {
+        return changeActiveColor(state, events.wheel);
+    }
+
+    if (events.type == SDL::MOUSEMOTION)
+    {
+        return changeCursorPosition(map, state, events.motion);
+    }
+
+    if (events.type == SDL::MOUSEBUTTONUP)
+    {
+        return placeTile(state);
+    }
+
+    if (events.type == SDL::KEYDOWN)
+    {
+        return processKeyDown(state, events.key);
+    }
+
+    return state;
+}
+
+function handleInput(without map, State state, EventState events)
+{
+    return state;
+}
+
+function all(any item, any context, function (any, any) predicate)
+{
+    return predicate(item, context);
+}
+
+function all((any item, ...items), any context, function (any, any) predicate)
+{
+    if (predicate(item, context))
+    {
+        return tail all(...items, context, predicate);
+    }
+
+    return false;
+}
+
+function requirementSatisfied(Requirement requirement, Map map)
+{
+    return countForColor(map, requirement.color) == requirement.count;
+}
+
+function requirementsSatisfied(Map map)
+{
+    return all(...map.requirements, map, requirementSatisfied);
+}
+
+function requirementsSatisfied(without map)
+{
+    return false;
+}
+
+function mainLoop(State state)
+{
+	SDL::SDL_SetRenderDrawColor(state.renderer, 0, 0, 0, 0);
+	SDL::SDL_RenderClear(state.renderer);
+
+    let events = SDL::SDL_WaitEventEx(createEventState());
+
+    if (events.type == SDL::SDL_QUIT)
+    {
+        return 0;
+    }
+
+    let map = Range::elementAt(...state.maps, state.mapIndex, 0);
+    let stateAfterInput = handleInput(map, state, events);
+
+    if (requirementsSatisfied(map))
+    {
+        let nextMapState = stateAfterInput with
+        {
+            mapIndex: stateAfterInput.mapIndex + 1
+        };
+
+        return tail mainLoop(nextMapState);
+    }
+
+    drawMap(map, stateAfterInput);
+
+	SDL::SDL_RenderPresent(stateAfterInput.renderer);
+
+    return tail mainLoop(stateAfterInput);
+}
+
+export i32 main()
+{
+    SDL::SDL_Init(SDL::INIT_VIDEO);
+    SDL::TTF::TTF_Init();
+
+	let window = SDL::SDL_CreateWindow("ld54", 0, 0, Width, Height, SDL::WINDOW_RESIZABLE);
+	let renderer = SDL::SDL_CreateRenderer(window, 0, 0);
+
+	let state = State
+	{
+        renderer: renderer,
+        font: SDL::TTF::TTF_OpenFont("NotoSans-Regular.ttf", 15),
+        maps: [
+            Map
+            {
+                title: "A gentle introduction",
+                tiles: Memory::allocate(36i64),
+                requirements: [
+                    Requirement
+                    {
+                        color: Red,
+                        count: 9
+                    },
+                    Requirement
+                    {
+                        color: Green,
+                        count: 9
+                    },
+                    Requirement
+                    {
+                        color: Blue,
+                        count: 9
+                    },
+                ]
+            },
+            Map
+            {
+                title: "Cut it out",
+                tiles: Memory::allocate(16i64),
+                requirements: [
+                    Requirement
+                    {
+                        color: Red,
+                        count: 4
+                    },
+                    Requirement
+                    {
+                        color: Green,
+                        count: 4
+                    },
+                    Requirement
+                    {
+                        color: Blue,
+                        count: 4
+                    },
+                ]
+            },
+            Map
+            {
+                title: "Blending colors!",
+                tiles: Memory::allocate(25i64),
+                requirements: [
+                    Requirement
+                    {
+                        color: Yellow,
+                        count: 9
+                    },
+                    Requirement
+                    {
+                        color: Red,
+                        count: 16
+                    },
+                ]
+            },
+            Map
+            {
+                title: "Everything fades to gray",
+                tiles: Memory::allocate(9i64),
+                requirements: [
+                    Requirement
+                    {
+                        color: Gray,
+                        count: 9
+                    }
+                ]
+            },
+            Map
+            {
+                title: "More colors",
+                tiles: Memory::allocate(49i64),
+                requirements: [
+                    Requirement
+                    {
+                        color: Red,
+                        count: 9
+                    },
+                    Requirement
+                    {
+                        color: Green,
+                        count: 4
+                    },
+                    Requirement
+                    {
+                        color: Blue,
+                        count: 4
+                    },
+                    Requirement
+                    {
+                        color: Cyan,
+                        count: 6
+                    },
+                    Requirement
+                    {
+                        color: Purple,
+                        count: 6
+                    },
+                    Requirement
+                    {
+                        color: Yellow,
+                        count: 6
+                    },
+                    Requirement
+                    {
+                        color: Gray,
+                        count: 6
+                    },
+                ]
+            },
+            Map
+            {
+                title: "Rainbow to eternity",
+                tiles: Memory::allocate(25i64),
+                requirements: [
+                    Requirement
+                    {
+                        color: Blue,
+                        count: 5
+                    },
+                    Requirement
+                    {
+                        color: Cyan,
+                        count: 3
+                    },
+                    Requirement
+                    {
+                        color: Green,
+                        count: 2
+                    },
+                    Requirement
+                    {
+                        color: Gray,
+                        count: 1
+                    },
+                    Requirement
+                    {
+                        color: Yellow,
+                        count: 3
+                    },
+                    Requirement
+                    {
+                        color: Red,
+                        count: 5
+                    },
+                ]
+            },
+            Map
+            {
+                title: "Cold as ice",
+                tiles: Memory::allocate(25i64),
+                requirements: [
+                    Requirement
+                    {
+                        color: Cyan,
+                        count: 12
+                    },
+                    Requirement
+                    {
+                        color: Blue,
+                        count: 4
+                    },
+                    Requirement
+                    {
+                        color: Gray,
+                        count: 9
+                    },
+                ]
+            },
+            Map
+            {
+                title: "Poison river",
+                tiles: Memory::allocate(25i64),
+                requirements: [
+                    Requirement
+                    {
+                        color: Purple,
+                        count: 20
+                    },
+                    Requirement
+                    {
+                        color: Green,
+                        count: 1
+                    },
+                    Requirement
+                    {
+                        color: Cyan,
+                        count: 1
+                    },
+                    Requirement
+                    {
+                        color: Blue,
+                        count: 1
+                    },
+                    Requirement
+                    {
+                        color: Red,
+                        count: 1
+                    },
+                    Requirement
+                    {
+                        color: Gray,
+                        count: 1
+                    },
+                ]
+            },
+        ],
+        activeColor: Red
+	};
+
+	return mainLoop(state);
+}
