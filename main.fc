@@ -303,7 +303,10 @@ function drawRequirement(Map map, State state, i32 x, i32 y, Requirement require
     let count = countForColor(map, requirement.color);
     let color = rgbFor(requirement.color);
 
-    let text = String::format("{} / {}", [count, requirement.count]);
+    let text = String::format("{}{} / {}{}", [
+        (count - (count % 10)) / 10, count,
+        (requirement.count - (requirement.count % 10)) / 10, requirement.count]
+    );
 
     drawTile(state, x, y, color);
     drawText(state, (x + TileSize) + (Padding * 3), y, Cast::toString(Memory::serialize(text)));
