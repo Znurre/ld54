@@ -6,6 +6,14 @@ global Purple: Red | Blue;
 global Yellow: Red | Green;
 global Gray: Cyan + 1;
 
+global Width: 800;
+global Height: 600;
+
+global TileSize: 32;
+global BorderSize: 4;
+global GridSize: 1;
+global Padding: 4;
+
 struct Color
 {
     r,
@@ -13,15 +21,11 @@ struct Color
     b
 };
 
-function rgb(i32 r, i32 g, i32 b)
+struct Tile
 {
-    return Color
-    {
-        r: r,
-        g: g,
-        b: b
-    };
-}
+    x: 0,
+    y: 0
+};
 
 struct Requirement
 {
@@ -40,20 +44,13 @@ struct State
 {
     renderer,
     font,
+    titleFont,
     maps,
     activeColor,
 
     cursor: Tile {},
     mapIndex: 0
 };
-
-global Width: 800;
-global Height: 600;
-
-global TileSize: 32;
-global BorderSize: 4;
-global GridSize: 1;
-global Padding: 4;
 
 struct EventState
 {
@@ -64,6 +61,16 @@ struct EventState
     SDL::MouseButtonEvent button,
     SDL::MouseWheelEvent wheel
 };
+
+function rgb(i32 r, i32 g, i32 b)
+{
+    return Color
+    {
+        r: r,
+        g: g,
+        b: b
+    };
+}
 
 function createEventState()
 {
@@ -76,50 +83,13 @@ function createEventState()
     };
 }
 
-function serialize(...range)
-{
-    return serialize(Memory::allocate(200i64), 0i64, ...range);
-}
-
-function serialize(buffer storage, i64 offset, (any c, ...remaining))
-{
-    if (Memory::details::set(storage, offset, c))
-    {
-        return tail serialize(Memory::reallocate(storage, offset + 2i64), offset + 1i64, ...remaining);
-    }
-
-    return tail serialize(storage, offset, ...remaining);
-}
-
-function serialize(buffer storage, i64 offset, any c)
-{
-    Memory::details::set(storage, offset, c);
-
-    return storage;
-}
-
-function sqrt(i32 number)
-{
-    return sqrt(number, 1, 1);
-}
-
-function sqrt(i32 number, i32 subtrahend, i32 i)
-{
-    if ((number - subtrahend) <= 0)
-    {
-        return i;
-    }
-
-    return tail sqrt(number - subtrahend, subtrahend + 2, i + 1);
-}
-
 function mapBounds(Map map)
 {
-    let size = sqrt(Range::size(...map.tiles, 0));
+    let size = Math::sqrt(Range::size(...map.tiles, 0));
 
     return SDL::Rect
     {
-        x: TileSize,
+        x: TileSize * 3,
         y: TileSize * 3,
         width: size * TileSize,
         height: size * TileSize
@@ -137,40 +107,15 @@ function inflate(SDL::Rect rect, i32 x, i32 y)
     };
 }
 
-function iota(i32 i, i32 count)
-{
-    if (i < count)
-    {
-        return i -> iota(i + 1, count);
-    }
-
-    return i;
-}
-
-function iota(i32 count)
-{
-    return iota(0, count);
-}
-
-function abs(i32 value)
-{
-    if (value < 0)
-    {
-        return value * -1;
-    }
-
-    return value;
-}
-
 function isTileUnderCursor(Tile tile, Tile cursor)
 {
-    return (abs(cursor.x - tile.x) <= 1)
-        && (abs(cursor.y - tile.y) <= 1);
+    return (Math::abs(cursor.x - tile.x) <= 1)
+        && (Math::abs(cursor.y - tile.y) <= 1);
 }
 
-function colorForTile(Color activeColor, Color tileColor, Tile tile, Tile cursor)
+function colorForTile(Color activeColor, Color tileColor, bool satisfied, Tile tile, Tile cursor)
 {
-    if (isTileUnderCursor(tile, cursor))
+    if (isTileUnderCursor(tile, cursor) && !satisfied)
     {
         return activeColor;
     }
@@ -178,9 +123,9 @@ function colorForTile(Color activeColor, Color tileColor, Tile tile, Tile cursor
     return tileColor;
 }
 
-function colorForTile(Color activeColor, without tileColor, Tile tile, Tile cursor)
+function colorForTile(Color activeColor, without tileColor, bool satisfied, Tile tile, Tile cursor)
 {
-    if (isTileUnderCursor(tile, cursor))
+    if (isTileUnderCursor(tile, cursor) && !satisfied)
     {
         return activeColor;
     }
@@ -188,14 +133,14 @@ function colorForTile(Color activeColor, without tileColor, Tile tile, Tile curs
     return rgb(0, 0, 0);
 }
 
-function colorForTile(any activeColor, any tileColor, Tile tile, Tile cursor)
+function colorForTile(any activeColor, any tileColor, bool satisfied, Tile tile, Tile cursor)
 {
     return rgb(0, 0, 0);
 }
 
-function drawGrid(Map map, State state, SDL::Rect outerBounds, i32 i, i32 color)
+function drawGrid(bool satisfied, Map map, State state, SDL::Rect outerBounds, i32 i, i32 color)
 {
-    let size = sqrt(Range::size(...map.tiles, 0));
+    let size = Math::sqrt(Range::size(...map.tiles, 0));
 
     let tile = tileFromIndex(i, size);
 
@@ -207,7 +152,7 @@ function drawGrid(Map map, State state, SDL::Rect outerBounds, i32 i, i32 color)
         height: TileSize
     };
 
-    let tileColor = colorForTile(rgbFor(state.activeColor), rgbFor(color), tile, state.cursor);
+    let tileColor = colorForTile(rgbFor(state.activeColor), rgbFor(color), satisfied, tile, state.cursor);
 
     SDL::SDL_SetRenderDrawColor(state.renderer, tileColor.r, tileColor.g, tileColor.b, 255);
     SDL::SDL_RenderFillRect(state.renderer, bounds);
@@ -227,28 +172,22 @@ function tileFromIndex(i32 index, i32 size)
     };
 }
 
-function drawGrid(Map map, State state, SDL::Rect outerBounds, i32 i, (i32 color, ...indexes))
+function drawGrid(bool satisfied, Map map, State state, SDL::Rect outerBounds, i32 i, (i32 color, ...indexes))
 {
-    drawGrid(map, state, outerBounds, i, color);
+    drawGrid(satisfied, map, state, outerBounds, i, color);
 
-    return tail drawGrid(map, state, outerBounds, i + 1, ...indexes);
+    return tail drawGrid(satisfied, map, state, outerBounds, i + 1, ...indexes);
 }
 
-struct Tile
+function drawMap(bool satisfied, without map, State state)
 {
-    x: 0,
-    y: 0
-};
-
-function drawMap(without map, State state)
-{
-    return nothing;
+    return drawOverlayText(state, "Congratulations! You managed to clear all levels!");
 }
 
-function drawMap(Map map, State state)
+function drawMap(bool satisfied, Map map, State state)
 {
     let numberOfTiles = Range::size(...map.tiles, 0);
-    let size = sqrt(numberOfTiles);
+    let size = Math::sqrt(numberOfTiles);
 
     let innerBounds = mapBounds(map);
     let outerBounds = inflate(innerBounds
@@ -259,10 +198,10 @@ function drawMap(Map map, State state)
     SDL::SDL_SetRenderDrawColor(state.renderer, 255, 255, 255, 255);
     SDL::SDL_RenderFillRect(state.renderer, outerBounds);
 
-    drawGrid(map, state, outerBounds, 0, ...map.tiles);
+    drawGrid(satisfied, map, state, outerBounds, 0, ...map.tiles);
     drawRequirement(map, state, (outerBounds.x + outerBounds.width) + TileSize, outerBounds.y, ...map.requirements);
     drawTile(state, outerBounds.x + ((outerBounds.width - TileSize) / 2), (outerBounds.y + outerBounds.height) + TileSize, rgbFor(state.activeColor));
-    drawText(state, TileSize, TileSize, map.title);
+    drawText(state, TileSize * 3, TileSize, map.title);
 
     return outerBounds;
 }
@@ -288,8 +227,6 @@ function drawTile(State state, i32 x, i32 y, Color color)
     return nothing;
 }
 
-import string toString(buffer input);
-
 function drawText(State state, i32 x, i32 y, string text)
 {
     let surface = SDL::TTF::RenderText_Solid(state.font, text, 255, 255, 255);
@@ -311,26 +248,6 @@ function drawText(State state, i32 x, i32 y, string text)
     return nothing;
 }
 
-function count(i32 c, any item, any context, function (any, any) predicate)
-{
-    if (predicate(item, context))
-    {
-        return c + 1;
-    }
-
-    return c;
-}
-
-function count(i32 c, (any item, ...items), any context, function (any, any) predicate)
-{
-    if (predicate(item, context))
-    {
-        return tail count(c + 1, ...items, context, predicate);
-    }
-
-    return tail count(c, ...items, context, predicate);
-}
-
 function isColor(i32 actual, i32 lookingFor)
 {
     return actual == lookingFor;
@@ -338,44 +255,44 @@ function isColor(i32 actual, i32 lookingFor)
 
 function countForColor(Map map, i32 color)
 {
-    return count(0, ...map.tiles, color, isColor);
+    return Range::count(map.tiles, color, isColor);
 }
 
 function rgbFor(i32 colorIndex)
 {
     if (colorIndex == Red)
     {
-        return rgb(255, 0, 0);
+        return rgb(162, 38, 51);
     }
 
     if (colorIndex == Green)
     {
-        return rgb(0, 255, 0);
+        return rgb(62, 137, 72);
     }
 
     if (colorIndex == Blue)
     {
-        return rgb(0, 0, 255);
+        return rgb(18, 78, 137);
     }
 
     if (colorIndex == Cyan)
     {
-        return rgb(0, 255, 255);
+        return rgb(44, 232, 245);
     }
 
     if (colorIndex == Yellow)
     {
-        return rgb(255, 255, 0);
+        return rgb(254, 174, 52);
     }
 
     if (colorIndex == Purple)
     {
-        return rgb(255, 0, 255);
+        return rgb(104, 56, 108);
     }
 
     if (colorIndex == Gray)
     {
-        return rgb(255, 255, 255);
+        return rgb(139, 155, 180);
     }
 
     return rgb(0, 0, 0);
@@ -386,15 +303,13 @@ function drawRequirement(Map map, State state, i32 x, i32 y, Requirement require
     let count = countForColor(map, requirement.color);
     let color = rgbFor(requirement.color);
 
-    let text = String::format(..."{} / {}", ...[count, requirement.count]);
+    let text = String::format("{} / {}", [count, requirement.count]);
 
     drawTile(state, x, y, color);
-    drawText(state, (x + TileSize) + (Padding * 3), y, toString(Memory::serialize(text)));
+    drawText(state, (x + TileSize) + (Padding * 3), y, Cast::toString(Memory::serialize(text)));
 
     return nothing;
 }
-
-import SDL::SDL_Surface RenderText_Solid(SDL::TTF::Font font, buffer text, i32 r, i32 g, i32 b);
 
 function drawRequirement(Map map, State state, i32 x, i32 y, (Requirement requirement, ...requirements))
 {
@@ -455,9 +370,6 @@ function placeTile(i32 i, i32 size, i32 color, State state)
     return color;
 }
 
-import i32 puts(string s);
-import void printnum(i32 number);
-
 function placeTile(i32 i, i32 size, (i32 color, ...tiles), State state)
 {
     return placeTile(i, size, color, state) -> placeTile(i + 1, size, ...tiles, state);
@@ -465,14 +377,11 @@ function placeTile(i32 i, i32 size, (i32 color, ...tiles), State state)
 
 function placeTile(Map map, State state)
 {
-    let numElem = Range::size(...map.tiles, 0);
-    let size = sqrt(numElem);
-
-    printnum(numElem);
+    let size = Math::sqrt(Range::size(...map.tiles, 0));
 
     return map with
     {
-        tiles: serialize(placeTile(0, size, ...map.tiles, state))
+        tiles: Memory::serialize(placeTile(0, size, ...map.tiles, state))
     };
 }
 
@@ -504,15 +413,13 @@ function placeTile(State state)
     };
 }
 
-import i64 toInt64(i32 value);
-
 function processKeyDown(Map map, SDL::KeyboardEvent key)
 {
     if (key.sym == SDL::SDLK_s)
     {
         return map with
         {
-            tiles: Memory::allocate(toInt64(Range::size(...map.tiles, 0)))
+            tiles: Memory::allocate(Cast::toInt64(Range::size(...map.tiles, 0)))
         };
     }
 
@@ -547,7 +454,7 @@ function processKeyDown(State state, SDL::KeyboardEvent key)
     };
 }
 
-function handleInput(Map map, State state, EventState events)
+function handleInput(Map map, State state, EventState events, bool satisfied)
 {
     if (events.type == SDL::MOUSEWHEEL)
     {
@@ -561,6 +468,14 @@ function handleInput(Map map, State state, EventState events)
 
     if (events.type == SDL::MOUSEBUTTONUP)
     {
+        if (satisfied)
+        {
+            return state with
+            {
+                mapIndex: state.mapIndex + 1
+            };
+        }
+
         return placeTile(state);
     }
 
@@ -572,24 +487,9 @@ function handleInput(Map map, State state, EventState events)
     return state;
 }
 
-function handleInput(without map, State state, EventState events)
+function handleInput(without map, State state, EventState events, bool satisfied)
 {
     return state;
-}
-
-function all(any item, any context, function (any, any) predicate)
-{
-    return predicate(item, context);
-}
-
-function all((any item, ...items), any context, function (any, any) predicate)
-{
-    if (predicate(item, context))
-    {
-        return tail all(...items, context, predicate);
-    }
-
-    return false;
 }
 
 function requirementSatisfied(Requirement requirement, Map map)
@@ -599,7 +499,7 @@ function requirementSatisfied(Requirement requirement, Map map)
 
 function requirementsSatisfied(Map map)
 {
-    return all(...map.requirements, map, requirementSatisfied);
+    return Range::all(map.requirements, map, requirementSatisfied);
 }
 
 function requirementsSatisfied(without map)
@@ -607,10 +507,60 @@ function requirementsSatisfied(without map)
     return false;
 }
 
+function drawOverlayText(State state, string text)
+{
+    let viewport = SDL::Rect
+    {
+        width: Width,
+        height: Height
+    };
+
+    SDL::SDL_SetRenderDrawColor(state.renderer, 0, 0, 0, 150);
+    SDL::SDL_RenderFillRect(state.renderer, viewport);
+
+    let surface = SDL::TTF::RenderText_Solid(state.titleFont, text, 255, 255, 255);
+    let texture = SDL::SDL_CreateTextureFromSurface(state.renderer, surface);
+
+    let width = SDL::GetSurfaceWidth(surface);
+    let height = SDL::GetSurfaceHeight(surface);
+
+    let rect = SDL::Rect
+    {
+        x: (Width - width) / 2,
+        y: (Height - height) / 2,
+        width: width,
+        height: height
+    };
+
+    SDL::SDL_RenderCopy(state.renderer, texture, 0i64, rect);
+    SDL::SDL_FreeSurface(surface);
+
+    return nothing;
+}
+
+function drawWinCondition(bool satisfied, State state)
+{
+    if (satisfied)
+    {
+        return drawOverlayText(state, "Level cleared!");
+    }
+
+    return nothing;
+}
+
 function mainLoop(State state)
 {
+    SDL::SDL_SetRenderDrawBlendMode(state.renderer, SDL::BLENDMODE_BLEND);
 	SDL::SDL_SetRenderDrawColor(state.renderer, 0, 0, 0, 0);
 	SDL::SDL_RenderClear(state.renderer);
+
+    let map = Range::elementAt(...state.maps, state.mapIndex, 0);
+    let satisfied = requirementsSatisfied(map);
+
+    drawMap(satisfied, map, state);
+    drawWinCondition(satisfied, state);
+
+	SDL::SDL_RenderPresent(state.renderer);
 
     let events = SDL::SDL_WaitEventEx(createEventState());
 
@@ -619,24 +569,9 @@ function mainLoop(State state)
         return 0;
     }
 
-    let map = Range::elementAt(...state.maps, state.mapIndex, 0);
-    let stateAfterInput = handleInput(map, state, events);
-
-    if (requirementsSatisfied(map))
-    {
-        let nextMapState = stateAfterInput with
-        {
-            mapIndex: stateAfterInput.mapIndex + 1
-        };
-
-        return tail mainLoop(nextMapState);
-    }
-
-    drawMap(map, stateAfterInput);
-
-	SDL::SDL_RenderPresent(stateAfterInput.renderer);
-
-    return tail mainLoop(stateAfterInput);
+    return tail mainLoop(
+        handleInput(map, state, events, satisfied)
+    );
 }
 
 export i32 main()
@@ -644,13 +579,14 @@ export i32 main()
     SDL::SDL_Init(SDL::INIT_VIDEO);
     SDL::TTF::TTF_Init();
 
-	let window = SDL::SDL_CreateWindow("ld54", 0, 0, Width, Height, SDL::WINDOW_RESIZABLE);
+	let window = SDL::SDL_CreateWindow("ld54", 0, 0, Width, Height, 0);
 	let renderer = SDL::SDL_CreateRenderer(window, 0, 0);
 
 	let state = State
 	{
         renderer: renderer,
         font: SDL::TTF::TTF_OpenFont("NotoSans-Regular.ttf", 15),
+        titleFont: SDL::TTF::TTF_OpenFont("NotoSans-Bold.ttf", 20),
         maps: [
             Map
             {

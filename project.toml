@@ -8,6 +8,7 @@ libs = [ "-lSDL2", "-lSDL2_image", "-lSDL2_ttf", "-lm" ]
 'std/sdl' = '1.0'
 'std/string' = '1.0'
 'std/io' = '1.0'
+'std/cast' = '1.0'
 
 [repos]
 std = 'https://github.com/Znurre/fluenc-modules'
